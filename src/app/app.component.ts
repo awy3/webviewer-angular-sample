@@ -15,26 +15,63 @@ export class AppComponent implements OnInit, AfterViewInit {
 
     WebViewer({
       path: '../lib',
-      initialDoc: '../files/webviewer-demo-annotated.pdf'
+      initialDoc: '../files/cheetahs.pdf',
+      fullAPI: true,
     }, this.viewer.nativeElement).then(instance => {
       this.wvInstance = instance;
+      const { docViewer, PDFNet } = instance;
 
-      // now you can access APIs through this.webviewer.getInstance()
-      instance.openElement('notesPanel');
-      // see https://www.pdftron.com/documentation/web/guides/ui/apis for the full list of APIs
+      const flipDoc = async() => {
+        const currentDocument = docViewer.getDocument();
+        await PDFNet.initialize();
+        const pdfDoc = await currentDocument.getPDFDoc();
 
-      // or listen to events from the viewer element
-      this.viewer.nativeElement.addEventListener('pageChanged', (e) => {
-        const [ pageNumber ] = e.detail;
-        console.log(`Current page is ${pageNumber}`);
+        const pageNumber = docViewer.getCurrentPage()
+
+        const page = await pdfDoc.getPage(pageNumber);
+        const { width, height } = currentDocument.getPageInfo(0);
+        //create a temp page
+        const pageRect =  await PDFNet.Rect.init(0, 0,width,height);
+        let newPage = await pdfDoc.pageCreate(pageRect);
+        const apWriter = await PDFNet.ElementWriter.create();
+        const apBuilder = await PDFNet.ElementBuilder.create();
+        //this  matrix will flip content on the x axis
+        const flipMatrix = await  new PDFNet.Matrix2D(-1, 0, 0, 1,width, 0);
+        //create  an 'element' from the existing page and apply a transform matrix to filp it
+        const ele = await apBuilder.createFormFromPage(page);
+        const GS =  await ele.getGState();
+        await GS.setTransformMatrix(flipMatrix);
+        //add the flipped element to the temp page
+        apWriter.beginOnPage(newPage,PDFNet.ElementWriter.WriteMode.e_underlay, true, false );
+        await apWriter.writePlacedElement(ele);
+        await apWriter.end();
+        //replace the page with the flip one
+        const pageToReplace = await  pdfDoc.getPageIterator(pageNumber);
+        await pdfDoc.pageRemove(pageToReplace)
+        await pdfDoc.pageInsert(pageToReplace,newPage);
+        docViewer.refreshAll();
+        docViewer.updateView();
+      }
+
+      instance.setHeaderItems(function(header) {
+        header.unshift(
+        {
+          type: 'actionButton',
+          img: `<svg version="1.1" id="Capa_1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px"
+              viewBox="0 0 20.562 20.562" style="enable-background:new 0 0 20.562 20.562;" xml:space="preserve">
+            <g>
+              <g>
+                <path style="fill:#030104;" d="M9.178,18.799V1.763L0,18.799H9.178z M8.517,18.136h-7.41l7.41-13.752V18.136z"/>
+                <polygon style="fill:#030104;" points="11.385,1.763 11.385,18.799 20.562,18.799 		"/>
+              </g>
+            </g>
+          </svg>`,
+          title:'Flip',
+          onClick: () => {
+            flipDoc();
+          }
+        })
       });
-
-      // or from the docViewer instance
-      instance.docViewer.on('annotationsLoaded', () => {
-        console.log('annotations loaded');
-      });
-
-      instance.docViewer.on('documentLoaded', this.wvDocumentLoadedHandler)
     })
   }
 
@@ -43,21 +80,5 @@ export class AppComponent implements OnInit, AfterViewInit {
   }
 
   wvDocumentLoadedHandler(): void {
-    // you can access docViewer object for low-level APIs
-    const docViewer = this.wvInstance;
-    const annotManager = this.wvInstance.annotManager;
-    // and access classes defined in the WebViewer iframe
-    const { Annotations } = this.wvInstance;
-    const rectangle = new Annotations.RectangleAnnotation();
-    rectangle.PageNumber = 1;
-    rectangle.X = 100;
-    rectangle.Y = 100;
-    rectangle.Width = 250;
-    rectangle.Height = 250;
-    rectangle.StrokeThickness = 5;
-    rectangle.Author = annotManager.getCurrentUser();
-    annotManager.addAnnotation(rectangle);
-    annotManager.drawAnnotations(rectangle.PageNumber);
-    // see https://www.pdftron.com/api/web/WebViewer.html for the full list of low-level APIs
   }
 }
